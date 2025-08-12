@@ -1,0 +1,13 @@
+---
+applications:
+- name: cf-jupyterlab
+  memory: 2G
+  disk_quota: 4G
+  instances: 1
+  buildpack: python_buildpack
+  stack: cflinuxfs4
+  timeout: 180
+  health-check-type: http
+  health-check-http-endpoint: /lab
+  env:
+    JUPYTER_ENABLE_LAB: "yes"
