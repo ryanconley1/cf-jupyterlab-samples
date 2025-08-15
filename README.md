@@ -19,8 +19,7 @@ When JupyterLab is bound to multiple services, you get:
 
 ## Getting started
 - git clone repository https://github.com/yannicklevederpvtl/cf-jupyterlab-uv
-- Add Python Packages
-Edit pyproject.toml:
+- Add Python Packages by editing pyproject.toml:
 <pre>
 langgraph-checkpoint-sqlite
 tavily-python
