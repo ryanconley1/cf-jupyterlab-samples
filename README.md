@@ -1,5 +1,5 @@
 # Jupyter Notebook Samples with Tanzu Platform for Cloud Foundry
-This repository provides JupyterLab notebooks built with Python, leveraging LangChain and LangGraph. They demonstrate patterns for connecting to a variety of services—such as large language models, data services, and vector databases deployed on to Tanzu Platform for Cloud Foundrywhile incorporating service discovery and credential management.
+This repository provides JupyterLab notebooks built with Python, leveraging LangChain and LangGraph. They demonstrate patterns for connecting to a variety of services—such as large language models, data services, and vector databases deployed on to Tanzu Platform for Cloud Foundry while incorporating service discovery and credential management.
 
 ## Why JupyterLab on TPCF?
 
