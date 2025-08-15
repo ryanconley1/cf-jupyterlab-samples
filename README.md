@@ -41,7 +41,7 @@ or use command in a JupyterLab Terminal
 <pre>
   cf push -f manifest.yml
 </pre>
-- git clone the cf-jupyterlab-samples and start coding
+- Open Jupyter Lab console and use git menu to clone the cf-jupyterlab-samples and start coding
   
 
 
