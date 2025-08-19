@@ -11,7 +11,8 @@ import operator
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langchain_core.messages import AnyMessage, SystemMessage, HumanMessage, AIMessage, ChatMessage
 from langchain_openai import ChatOpenAI
-from langchain_core.pydantic_v1 import BaseModel
+#from langchain_core.pydantic_v1 import BaseModel
+from pydantic import BaseModel, ValidationError
 from tavily import TavilyClient
 import os
 import sqlite3
@@ -27,9 +28,10 @@ class AgentState(TypedDict):
     revision_number: int
     max_revisions: int
     count: Annotated[int, operator.add]
-
+    
 def is_chatservice(service):
     return service["name"] == "gen-ai-qwen3-ultra"
+
 class Queries(BaseModel):
     queries: List[str]
     
@@ -45,7 +47,7 @@ class ewriter():
         chat_services = filter(is_chatservice, services["genai"])
         chat_credentials = list(chat_services)[0]["credentials"]
 
-        self.model = ChatOpenAI(temperature=0.9, model=chat_credentials["model_name"], base_url=chat_credentials["api_base"], api_key=chat_credentials["api_key"], http_client=httpx_client)
+        self.model = ChatOpenAI(temperature=0.9, model=chat_credentials["model_name"], base_url=chat_credentials["api_base"],    api_key=chat_credentials["api_key"], http_client=httpx_client)
 
         self.PLAN_PROMPT = ("You are an expert writer tasked with writing a high level outline of a short 3 paragraph essay. "
                             "Write such an outline for the user provided topic. Give the three main headers of an outline of "
@@ -67,6 +69,7 @@ class ewriter():
                                          "be used when making any requested revisions (as outlined below). "
                                          "Generate a list of search queries that will gather any relevant information. "
                                          "Only generate 2 queries max.")
+        os.environ['TAVILY_API_KEY']="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"
         self.tavily = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
         builder = StateGraph(AgentState)
         builder.add_node("planner", self.plan_node)
@@ -90,77 +93,109 @@ class ewriter():
             interrupt_after=['planner', 'generate', 'reflect', 'research_plan', 'research_critique']
         )
 
+    def extract_json(text):
+        # Remove unwanted tags like <think> and <speak>
+        cleaned_text = re.sub(r'<\/?[\w\d]+>', '', text).strip()
+    
+        # Now try to extract the JSON part using regex
+        match = re.search(r'\{.*\}', cleaned_text, re.DOTALL)
+        if not match:
+            raise ValueError("No JSON object found in response")
+        return json.loads(match.group(0))
 
+        #implement nodes
     def plan_node(self, state: AgentState):
-        messages = [
-            SystemMessage(content=self.PLAN_PROMPT), 
-            HumanMessage(content=state['task'])
-        ]
-        response = self.model.invoke(messages)
-        return {"plan": response.content,
-               "lnode": "planner",
-                "count": 1,
-               }
-    def research_plan_node(self, state: AgentState):
-        queries = self.model.with_structured_output(Queries).invoke([
-            SystemMessage(content=self.RESEARCH_PLAN_PROMPT),
-            HumanMessage(content=state['task'])
-        ])
-        content = state['content'] or []  # add to content
-        for q in queries.queries:
-            response = self.tavily.search(query=q, max_results=2)
-            for r in response['results']:
-                content.append(r['content'])
-        return {"content": content,
-                "queries": queries.queries,
-               "lnode": "research_plan",
-                "count": 1,
-               }
-    def generation_node(self, state: AgentState):
-        content = "\n\n".join(state['content'] or [])
-        user_message = HumanMessage(
-            content=f"{state['task']}\n\nHere is my plan:\n\n{state['plan']}")
-        messages = [
-            SystemMessage(
-                content=self.WRITER_PROMPT.format(content=content)
-            ),
-            user_message
+            messages = [
+                SystemMessage(content=self.PLAN_PROMPT),
+                HumanMessage(content=state["task"])
             ]
-        response = self.model.invoke(messages)
-        return {
-            "draft": response.content, 
-            "revision_number": state.get("revision_number", 1) + 1,
-            "lnode": "generate",
-            "count": 1,
-        }
-    def reflection_node(self, state: AgentState):
-        messages = [
-            SystemMessage(content=self.REFLECTION_PROMPT), 
-            HumanMessage(content=state['draft'])
-        ]
-        response = self.model.invoke(messages)
-        return {"critique": response.content,
-               "lnode": "reflect",
+            response = self.model.invoke(messages)
+            return {"plan": response.content,
+                    "lnode": "planner",
+                    "count": 1,
+            }
+        
+    def research_plan_node(self, state: AgentState):
+            raw_response = self.model.invoke([
+                SystemMessage(content=self.RESEARCH_PLAN_PROMPT),
+                HumanMessage(content=state['task'])
+            ])
+        
+            try:
+                json_data = extract_json(raw_response.content if hasattr(raw_response, 'content') else str(raw_response))
+                queries = Queries.model_validate(json_data)
+            except Exception as e:
+                print("Error parsing JSON from model output:", e)
+                return {"content": state.get('content', [])}
+        
+            content = state.get('content', [])
+            for q in queries.queries:
+                response = self.tavily.search(query=q, max_results=2)
+                for r in response['results']:
+                    content.append(r['content'])
+        
+            return {"content": content,
+                    "queries": queries.queries,
+                   "lnode": "research_plan",
+                   "count": 1,}
+    def generation_node(self, state: AgentState):
+            content = "\n\n".join(["content"] or [])
+            user_message = HumanMessage(content=f"{state['task']}\n\nHere is my plan:\n\n{state['plan']}")
+            messages = [
+                SystemMessage(content=self.WRITER_PROMPT.format(content=content)),
+                user_message,
+            ]
+            response = self.model.invoke(messages)
+            return {
+                "draft": response.content,
+                "revision_number": state.get("revision_number", 1) + 1,
+                "lnode": "generate",
                 "count": 1,
-        }
-    def research_critique_node(self, state: AgentState):
-        queries = self.model.with_structured_output(Queries).invoke([
-            SystemMessage(content=self.RESEARCH_CRITIQUE_PROMPT),
-            HumanMessage(content=state['critique'])
-        ])
-        content = state['content'] or []
-        for q in queries.queries:
-            response = self.tavily.search(query=q, max_results=2)
-            for r in response['results']:
-                content.append(r['content'])
-        return {"content": content,
-               "lnode": "research_critique",
-                "count": 1,
-        }
-    def should_continue(self, state):
-        if state["revision_number"] > state["max_revisions"]:
-            return END
-        return "reflect"
+            }
+    def reflection_node(self,state: AgentState):
+            messages = [
+                SystemMessage(content=self.REFLECTION_PROMPT),
+                HumanMessage(content=state['draft']),
+            ]
+            response = self.model.invoke(messages)
+            return {"critique": response.content,
+                    "lnode": "reflect",
+                    "count": 1,}
+    
+    def research_critique_node(self,state: AgentState):
+            try:
+                # Run the model
+                raw_response = self.model.invoke([
+                    SystemMessage(content=RESEARCH_CRITIQUE_PROMPT),
+                    HumanMessage(content=state['critique'])
+                ])
+                
+                # Extract JSON from model output (if Qwen adds extra tokens)
+                text_output = raw_response.content if isinstance(raw_response, AIMessage) else str(raw_response)
+                parsed = extract_json(text_output)
+                queries = Queries.model_validate(parsed)
+        
+            except Exception as e:
+                print("Error during model invocation or JSON parsing:", e)
+                return {"content": state.get("content", [])}
+        
+            content = state.get("content", [])
+            for q in queries.queries:
+                try:
+                    response = self.tavily.search(query=q, max_results=2)
+                    for r in response.get("results", []):
+                        content.append(r.get("content", ""))
+                except Exception as e:
+                    print(f"Search failed for query '{q}': {e}")
+            
+            return {"content": content,
+                    "lnode": "research_critique",
+                    "count": 1,}
+    
+    def should_continue(self,state):
+            if state["revision_number"] > state["max_revisions"]:
+                return END
+            return "reflect"
 
 import gradio as gr
 import time
@@ -435,7 +470,15 @@ class writer_gui( ):
         return demo
 
     def launch(self, share=None):
-        if port := os.getenv("PORT1"):
-            self.demo.launch(share=True, server_port=int(port), server_name="0.0.0.0")
-        else:
-            self.demo.launch(share=self.share)
+        self.demo.launch(
+            share=True,  # Creates a public link
+            server_name="0.0.0.0",  # Allows access from any IP
+            server_port=7860,  # Default Gradio port
+            show_error=True,
+            quiet=False
+        )
+
+        #if port := os.getenv("PORT1"):
+            #self.demo.launch(share=True, server_port=int(port), server_name="0.0.0.0", )
+        #else:
+            #self.demo.launch(share=self.share)
