@@ -4,7 +4,6 @@ import json
 from openai import OpenAI
 import httpx
 import warnings
-warnings.filterwarnings("ignore", message=".*TqdmWarning.*")
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, Annotated, List
 import operator
@@ -16,6 +15,10 @@ from pydantic import BaseModel, ValidationError
 from tavily import TavilyClient
 import os
 import sqlite3
+import json
+import re
+
+warnings.filterwarnings("ignore", message=".*TqdmWarning.*")
 
 class AgentState(TypedDict):
     task: str
@@ -102,28 +105,64 @@ class ewriter():
         if not match:
             raise ValueError("No JSON object found in response")
         return json.loads(match.group(0))
-
-        #implement nodes
+        
+    def normalize_to_queries(output: str):
+        """
+        Convert model output into a dict matching Queries schema.
+        """
+        # Remove <think>...</think> if present
+        output = re.sub(r"<think>.*?</think>", "", output, flags=re.DOTALL).strip()
+    
+        # Try strict JSON parse
+        try:
+            return json.loads(output)
+        except json.JSONDecodeError:
+            # Fallback: convert markdown/bullets/numbered list into dict
+            lines = [
+                re.sub(r'^\s*[\d\-\*\.\)]*\s*', '', line).strip(' *"')
+                for line in output.splitlines()
+                if line.strip()
+            ]
+            return {"queries": lines}
+    #implement nodes
     def plan_node(self, state: AgentState):
             messages = [
                 SystemMessage(content=self.PLAN_PROMPT),
                 HumanMessage(content=state["task"])
             ]
             response = self.model.invoke(messages)
-            return {"plan": response.content,
+            response_content = response.content if hasattr(response, 'content') else str(response)
+            # Remove <think>...</think> blocks completely
+            response_content = re.sub(r"<think>.*?</think>", "", response_content, flags=re.DOTALL).strip()
+            return {"plan": response_content,
                     "lnode": "planner",
                     "count": 1,
             }
         
     def research_plan_node(self, state: AgentState):
+            print("entering research_plan_node")
             raw_response = self.model.invoke([
                 SystemMessage(content=self.RESEARCH_PLAN_PROMPT),
                 HumanMessage(content=state['task'])
             ])
+            response_content = raw_response.content if hasattr(raw_response, 'content') else str(raw_response)
+        
+            # Remove <think>...</think> blocks completely
+            response_content = re.sub(r"<think>.*?</think>", "", response_content, flags=re.DOTALL).strip()
         
             try:
-                json_data = extract_json(raw_response.content if hasattr(raw_response, 'content') else str(raw_response))
+                # Try parsing as JSON first
+                try:
+                    json_data = json.loads(response_content)
+                except json.JSONDecodeError:
+                    # Fallback: convert numbered/bulleted list into dict
+                    lines = [line.strip("0123456789. -") for line in response_content.splitlines() if line.strip()]
+                    json_data = {"queries": lines}
+        
+                print("json data in research plan mode:", json_data)
+                response_content = normalize_to_queries(response_content)
                 queries = Queries.model_validate(json_data)
+        
             except Exception as e:
                 print("Error parsing JSON from model output:", e)
                 return {"content": state.get('content', [])}
@@ -131,13 +170,17 @@ class ewriter():
             content = state.get('content', [])
             for q in queries.queries:
                 response = self.tavily.search(query=q, max_results=2)
-                for r in response['results']:
-                    content.append(r['content'])
+                
+                for r in response.get("results", []):
+                    content_piece = r.get("content", "")
+                    content.append(str(content_piece))
+        
+            print("exiting research_plan_node")
         
             return {"content": content,
                     "queries": queries.queries,
-                   "lnode": "research_plan",
-                   "count": 1,}
+                    "lnode": "research_plan",
+                    "count": 1,}
     def generation_node(self, state: AgentState):
             content = "\n\n".join(["content"] or [])
             user_message = HumanMessage(content=f"{state['task']}\n\nHere is my plan:\n\n{state['plan']}")
@@ -146,8 +189,12 @@ class ewriter():
                 user_message,
             ]
             response = self.model.invoke(messages)
+            response_content = response.content if hasattr(response, 'content') else str(response)
+            # Remove <think>...</think> blocks completely
+            response_content = re.sub(r"<think>.*?</think>", "", response_content, flags=re.DOTALL).strip()
+        
             return {
-                "draft": response.content,
+                "draft": response_content,
                 "revision_number": state.get("revision_number", 1) + 1,
                 "lnode": "generate",
                 "count": 1,
@@ -158,7 +205,11 @@ class ewriter():
                 HumanMessage(content=state['draft']),
             ]
             response = self.model.invoke(messages)
-            return {"critique": response.content,
+            response_content = response.content if hasattr(response, 'content') else str(response)
+
+            # Remove <think>...</think> blocks completely
+            response_content = re.sub(r"<think>.*?</think>", "", response_content, flags=re.DOTALL).strip()
+            return {"critique": response_content,
                     "lnode": "reflect",
                     "count": 1,}
     
@@ -166,13 +217,16 @@ class ewriter():
             try:
                 # Run the model
                 raw_response = self.model.invoke([
-                    SystemMessage(content=RESEARCH_CRITIQUE_PROMPT),
+                    SystemMessage(content=self.RESEARCH_CRITIQUE_PROMPT),
                     HumanMessage(content=state['critique'])
                 ])
-                
+                response_content = raw_response.content if isinstance(raw_response, AIMessage) else str(raw_response)
+
+                # Remove <think>...</think> blocks completely
+                response_content = re.sub(r"<think>.*?</think>", "", response_content, flags=re.DOTALL)
+
                 # Extract JSON from model output (if Qwen adds extra tokens)
-                text_output = raw_response.content if isinstance(raw_response, AIMessage) else str(raw_response)
-                parsed = extract_json(text_output)
+                response_content = normalize_to_queries(response_content)
                 queries = Queries.model_validate(parsed)
         
             except Exception as e:
@@ -184,7 +238,8 @@ class ewriter():
                 try:
                     response = self.tavily.search(query=q, max_results=2)
                     for r in response.get("results", []):
-                        content.append(r.get("content", ""))
+                        content_piece = r.get("content", "")
+                        content.append(str(content_piece))
                 except Exception as e:
                     print(f"Search failed for query '{q}': {e}")
             
@@ -352,7 +407,8 @@ class writer_gui( ):
                 for state in self.graph.get_state_history(self.thread):
                     if state.metadata['step'] < 1:  #ignore early states
                         continue
-                    s_thread_ts = state.config['configurable']['thread_ts']
+                    #s_thread_ts = state.config['configurable']['thread_ts']
+                    s_thread_ts = state.config.get("configurable", {}).get("thread_ts")
                     s_tid = state.config['configurable']['thread_id']
                     s_count = state.values['count']
                     s_lnode = state.values['lnode']
