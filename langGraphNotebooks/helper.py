@@ -17,6 +17,7 @@ import os
 import sqlite3
 import json
 import re
+from typing import Dict, Any
 
 warnings.filterwarnings("ignore", message=".*TqdmWarning.*")
 
@@ -105,25 +106,41 @@ class ewriter():
         if not match:
             raise ValueError("No JSON object found in response")
         return json.loads(match.group(0))
-        
-    def normalize_to_queries(output: str):
+
+    def normalize_to_queries(output: str) -> Dict[str, Any]:
         """
-        Convert model output into a dict matching Queries schema.
+        Normalize LLM output into a dict matching the Queries schema.
+        Always returns: {"queries": [...]}.
+        Also logs the result as clean JSON.
         """
-        # Remove <think>...</think> if present
+    
+        # Remove <think>...</think> blocks if present
         output = re.sub(r"<think>.*?</think>", "", output, flags=re.DOTALL).strip()
     
-        # Try strict JSON parse
+        data: Dict[str, Any]
+    
+        # Try strict JSON parse first
         try:
-            return json.loads(output)
-        except json.JSONDecodeError:
-            # Fallback: convert markdown/bullets/numbered list into dict
+            parsed = json.loads(output)
+            if isinstance(parsed, dict) and "queries" in parsed:
+                data = parsed
+            elif isinstance(parsed, list):
+                data = {"queries": parsed}
+            else:
+                raise ValueError("Invalid schema")
+        except Exception:
+            # Fallback: treat as markdown/bullet/numbered list
             lines = [
-                re.sub(r'^\s*[\d\-\*\.\)]*\s*', '', line).strip(' *"')
-                for line in output.splitlines()
-                if line.strip()
+                re.sub(r'^\s*[\d\-\*\.\)]*\s*', '', line).strip(' *"`')
+                for line in output.splitlines() if line.strip()
             ]
-            return {"queries": lines}
+            # Deduplicate while preserving order
+            seen = set()
+            unique_lines = [q for q in lines if not (q in seen or seen.add(q))]
+            data = {"queries": unique_lines}
+    
+        return data
+    
     #implement nodes
     def plan_node(self, state: AgentState):
             messages = [
@@ -139,48 +156,53 @@ class ewriter():
                     "count": 1,
             }
         
-    def research_plan_node(self, state: AgentState):
-            print("entering research_plan_node")
-            raw_response = self.model.invoke([
+    def research_plan_node(self,state: dict):
+        """
+        Generates a research plan using a Qwen model and Tavily search.
+        Works without Pydantic.
+        """
+        # Invoke Qwen model (plain text output)
+        raw_response = self.model.invoke(
+            [
                 SystemMessage(content=self.RESEARCH_PLAN_PROMPT),
-                HumanMessage(content=state['task'])
-            ])
-            response_content = raw_response.content if hasattr(raw_response, 'content') else str(raw_response)
-        
-            # Remove <think>...</think> blocks completely
-            response_content = re.sub(r"<think>.*?</think>", "", response_content, flags=re.DOTALL).strip()
-        
+                HumanMessage(content=state["task"]),
+            ]
+        )
+        response_content = getattr(raw_response, "content", str(raw_response))
+    
+        # Remove <think>...</think> if present
+        response_content = re.sub(r"<think>.*?</think>", "", response_content, flags=re.DOTALL).strip()
+    
+        # Normalize into a list of queries (handle bullets, numbers, etc.)
+        lines = [
+            re.sub(r'^\s*[\d\-\*\.\)]*\s*', '', line).strip(' *"`')
+            for line in response_content.splitlines()
+            if line.strip()
+        ]
+        # Deduplicate
+        seen = set()
+        queries_list = [q for q in lines if not (q in seen or seen.add(q))]
+    
+        # Initialize content
+        content = state.get("content", [])
+    
+        # Perform Tavily searches
+        for q in queries_list:
             try:
-                # Try parsing as JSON first
-                try:
-                    json_data = json.loads(response_content)
-                except json.JSONDecodeError:
-                    # Fallback: convert numbered/bulleted list into dict
-                    lines = [line.strip("0123456789. -") for line in response_content.splitlines() if line.strip()]
-                    json_data = {"queries": lines}
-        
-                print("json data in research plan mode:", json_data)
-                response_content = normalize_to_queries(response_content)
-                queries = Queries.model_validate(json_data)
-        
-            except Exception as e:
-                print("Error parsing JSON from model output:", e)
-                return {"content": state.get('content', [])}
-        
-            content = state.get('content', [])
-            for q in queries.queries:
                 response = self.tavily.search(query=q, max_results=2)
-                
                 for r in response.get("results", []):
                     content_piece = r.get("content", "")
-                    content.append(str(content_piece))
-        
-            print("exiting research_plan_node")
-        
-            return {"content": content,
-                    "queries": queries.queries,
-                    "lnode": "research_plan",
-                    "count": 1,}
+                    if content_piece:
+                        content.append(str(content_piece))
+            except Exception as e:
+                print(f"Search failed for query '{q}': {e}")
+    
+        return {
+            "content": content,
+            "queries": queries_list,
+            "lnode": "research_plan",
+            "count": 1,
+        }
     def generation_node(self, state: AgentState):
             content = "\n\n".join(["content"] or [])
             user_message = HumanMessage(content=f"{state['task']}\n\nHere is my plan:\n\n{state['plan']}")
@@ -214,38 +236,52 @@ class ewriter():
                     "count": 1,}
     
     def research_critique_node(self,state: AgentState):
+        """
+        Generates a research plan using a Qwen model and Tavily search.
+        Works without Pydantic.
+        """
+        # Invoke Qwen model (plain text output)
+        raw_response = self.model.invoke(
+            [
+                SystemMessage(content=self.RESEARCH_CRITIQUE_PROMPT),
+                HumanMessage(content=state["critique"]),
+            ]
+        )
+        response_content = getattr(raw_response, "content", str(raw_response))
+    
+        # Remove <think>...</think> if present
+        response_content = re.sub(r"<think>.*?</think>", "", response_content, flags=re.DOTALL).strip()
+    
+        # Normalize into a list of queries (handle bullets, numbers, etc.)
+        lines = [
+            re.sub(r'^\s*[\d\-\*\.\)]*\s*', '', line).strip(' *"`')
+            for line in response_content.splitlines()
+            if line.strip()
+        ]
+        # Deduplicate
+        seen = set()
+        queries_list = [q for q in lines if not (q in seen or seen.add(q))]
+    
+        # Initialize content
+        content = state.get("content", [])
+    
+        # Perform Tavily searches
+        for q in queries_list:
             try:
-                # Run the model
-                raw_response = self.model.invoke([
-                    SystemMessage(content=self.RESEARCH_CRITIQUE_PROMPT),
-                    HumanMessage(content=state['critique'])
-                ])
-                response_content = raw_response.content if isinstance(raw_response, AIMessage) else str(raw_response)
-
-                # Remove <think>...</think> blocks completely
-                response_content = re.sub(r"<think>.*?</think>", "", response_content, flags=re.DOTALL)
-
-                # Extract JSON from model output (if Qwen adds extra tokens)
-                response_content = normalize_to_queries(response_content)
-                queries = Queries.model_validate(parsed)
-        
-            except Exception as e:
-                print("Error during model invocation or JSON parsing:", e)
-                return {"content": state.get("content", [])}
-        
-            content = state.get("content", [])
-            for q in queries.queries:
-                try:
-                    response = self.tavily.search(query=q, max_results=2)
-                    for r in response.get("results", []):
-                        content_piece = r.get("content", "")
+                response = self.tavily.search(query=q, max_results=2)
+                for r in response.get("results", []):
+                    content_piece = r.get("content", "")
+                    if content_piece:
                         content.append(str(content_piece))
-                except Exception as e:
-                    print(f"Search failed for query '{q}': {e}")
-            
-            return {"content": content,
-                    "lnode": "research_critique",
-                    "count": 1,}
+            except Exception as e:
+                print(f"Search failed for query '{q}': {e}")
+    
+        return {
+            "content": content,
+            "queries": queries_list,
+            "lnode": "research_critique",
+            "count": 1,
+        }
     
     def should_continue(self,state):
             if state["revision_number"] > state["max_revisions"]:
