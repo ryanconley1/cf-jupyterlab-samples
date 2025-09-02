@@ -1,0 +1,11 @@
+date,aircraft_id,part,damage_desc
+2025-08-01,AC-101,Left Wing Flap,Crack near hinge
+2025-08-02,AC-102,Engine 1,Oil leak detected
+2025-08-03,AC-103,Landing Gear,Hydraulic fluid leakage
+2025-08-04,AC-104,Fuselage,Minor dent on rear section
+2025-08-05,AC-105,Rudder,Loose control linkage
+2025-08-06,AC-106,Engine 2,Excessive vibration
+2025-08-07,AC-107,Left Wing Flap,Corrosion detected
+2025-08-08,AC-108,Avionics Panel,Faulty navigation display
+2025-08-09,AC-109,Landing Gear,Strut misalignment
+2025-08-10,AC-110,Rudder,Crack on trailing edge
