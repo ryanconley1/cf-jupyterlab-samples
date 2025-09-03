@@ -1,4 +1,3 @@
-import streamlit as st
 from langchain.chains import RetrievalQA
 from langchain.chat_models import ChatOpenAI
 from langchain_postgres.vectorstores import PGVector
@@ -23,8 +22,6 @@ import ssl
 from langchain_community.embeddings import OllamaEmbeddings
 from openai import OpenAI
 from langchain.chains import RetrievalQA
-import panel as pn  # GUI
-pn.extension()
 import gradio as gr
 import re
 
@@ -50,11 +47,25 @@ API_BASE = embedding_credentials["api_base"] + "/v1"
 API_KEY = embedding_credentials["api_key"]
 MODEL_NAME = embedding_credentials["model_name"]
 
-
 def embed_text(text: str):
-    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
-    payload = {"model": {MODEL_NAME}, "input": text}
-    resp = requests.post(f"{API_BASE}/embeddings", headers=headers, json=payload, verify=False)
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": MODEL_NAME,   # make sure MODEL_NAME is a str, not a tuple
+        "input": text
+    }
+
+    print("HEADERS:", headers)
+    print("PAYLOAD:", payload)
+
+    resp = requests.post(
+        f"{API_BASE}/embeddings",
+        headers=headers,
+        json=payload,
+        verify=False
+    )
     resp.raise_for_status()
     return resp.json()["data"][0]["embedding"]
 
@@ -120,7 +131,9 @@ def chat(query, history):
     answer = qa.run(query)
     answer = sanitize_answer(answer)
     history = history or []
-    history.append((query, answer))
+    # append as a string pair (Gradio is fine with this)
+    history.append({"role": "user", "content": query})
+    history.append({"role": "assistant", "content": answer})
     return history
 
 demo = gr.ChatInterface(
