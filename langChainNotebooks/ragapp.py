@@ -132,9 +132,8 @@ def chat(query, history):
     answer = sanitize_answer(answer)
     history = history or []
     # append as a string pair (Gradio is fine with this)
-    history.append({"role": "user", "content": query})
-    history.append({"role": "assistant", "content": answer})
-    return history
+    history.append((query, answer))   # 👈 tuple, not dict
+    return answer, history
 
 demo = gr.ChatInterface(
     fn=chat,
