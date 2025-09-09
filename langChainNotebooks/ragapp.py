@@ -127,19 +127,18 @@ def sanitize_answer(answer):
         answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
     return answer
 
-def chat(query, history):
-    answer = qa.run(query)
-    answer = sanitize_answer(answer)
-    history = history or []
-    # append as a string pair (Gradio is fine with this)
-    history.append((query, answer))   # 👈 tuple, not dict
-    return answer, history
-
+def predict(message, history):
+    # Run RetrievalQA
+    output = qa.invoke({"query": message})  # dict: {"result", "source_documents"}
+    answer = sanitize_answer(output["result"])
+    return answer
+    
 demo = gr.ChatInterface(
-    fn=chat,
+    fn=predict,
     title="🛠 Aircraft Maintenance Chatbot",
     description="Ask questions about maintenance records or aircraft taxonomy."
 )
+
 
 demo.launch(
     share=True,
