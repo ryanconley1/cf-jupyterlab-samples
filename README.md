@@ -42,6 +42,38 @@ or use command in a JupyterLab Terminal
   cf push -f manifest.yml
 </pre>
 - Open Jupyter Lab console and use git menu to clone the cf-jupyterlab-samples and start coding
+
+
+## Running Notebooks locally
+- Install uv with the official guide https://docs.astral.sh/uv/getting-started/installation/
+- Clone the github repository
+- project already has pyproject.toml file
+<pre>
+  uv sync
+</pre>
+- Launch Jupyter notebook with uv
+<pre>
+  uv run --with jupyter jupyter lab
+</pre>
+- Open the notebooks
+- Navigate to langChainNotebooks
+- start with `langchain_agent.ipynb file
+- you may need to comment out following lines
+  <pre>
+    chat_service = env.get_service(name="gen-ai-qwen3-ultra")
+    chat_credentials = chat_service.credentials
+  </pre>
+- Update model credentials with your credentials
+  <pre>
+    llm = ChatOpenAI(
+    temperature=0.9,
+    model=your_model_name,
+    base_url=your_model_base,
+    api_key=your_api_key,
+    http_client=httpx_client
+)
+  </pre>
+- now you can run the notebooks locally instead of only on Tanzu Platform
   
 
 
