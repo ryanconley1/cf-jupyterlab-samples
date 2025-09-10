@@ -24,28 +24,25 @@ from openai import OpenAI
 from langchain.chains import RetrievalQA
 import gradio as gr
 import re
-
+from cfenv import AppEnv
 # -----------------------------
 # Embedding setup
 # -----------------------------
 # -----------------------------
 # Load services from env
 # -----------------------------
-vcapservices = os.getenv('VCAP_SERVICES')
-services = json.loads(vcapservices)
+env = AppEnv()
 
 # -----------------------------
 # Embedding service details
 # -----------------------------
-def is_embeddingservice(service):
-    return service["name"] == "prod-embedding-nomic-text"
-
-embedding_services = filter(is_embeddingservice, services["genai"])
-embedding_credentials = list(embedding_services)[0]["credentials"]
+embedding_service = env.get_service(name="prod-embedding-nomic-text")
+embedding_credentials = embedding_service.credentials
 
 API_BASE = embedding_credentials["api_base"] + "/v1"
 API_KEY = embedding_credentials["api_key"]
 MODEL_NAME = embedding_credentials["model_name"]
+
 
 def embed_text(text: str):
     headers = {
@@ -78,10 +75,11 @@ embedding = CustomEmbeddings()
 # -----------------------------
 # Vectorstore setup
 # -----------------------------
-def is_vectordbservice(service):
-    return service["name"] == "vector-db"
-db_services = filter(is_vectordbservice, services["postgres"])
-db_credentials = list(db_services)[0]["credentials"]
+# -----------------------------
+# Database connection
+# -----------------------------
+db_service = env.get_service(name="vector-db")
+db_credentials = db_service.credentials
 DB_URI = db_credentials["uri"]
 
 vectorstore = PGVector(
@@ -91,23 +89,25 @@ vectorstore = PGVector(
     use_jsonb=True,
     create_extension=False,   # already created
 )
-
 # -----------------------------
 # RAG setup
 # -----------------------------
-httpx_client = httpx.Client(http2=True, verify=False, timeout=30.0)
+# Get bound service "gen-ai-qwen3-ultra"
+chat_service = env.get_service(name="gen-ai-qwen3-ultra")
+chat_credentials = chat_service.credentials
 
-vcapservices = os.getenv('VCAP_SERVICES')
-services = json.loads(vcapservices)
+# Optional: configure custom http client
+httpx_client = httpx.Client(verify=False)
 
-def is_chatservice(service):
-    return service["name"] == "gen-ai-qwen3-ultra"
+# Initialize LLM with credentials from cfenv
+llm = ChatOpenAI(
+    temperature=0.9,
+    model=chat_credentials["model_name"],
+    base_url=chat_credentials["api_base"],
+    api_key=chat_credentials["api_key"],
+    http_client=httpx_client
+)
 
-chat_services = filter(is_chatservice, services["genai"])
-chat_credentials = list(chat_services)[0]["credentials"]
-
-
-llm = ChatOpenAI(temperature=0.9, model=chat_credentials["model_name"], base_url=chat_credentials["api_base"], api_key=chat_credentials["api_key"], http_client=httpx_client)
 retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k":3})
 qa = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
 
