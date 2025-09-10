@@ -18,6 +18,7 @@ import sqlite3
 import json
 import re
 from typing import Dict, Any
+from cfenv import AppEnv
 
 warnings.filterwarnings("ignore", message=".*TqdmWarning.*")
 
@@ -33,25 +34,28 @@ class AgentState(TypedDict):
     max_revisions: int
     count: Annotated[int, operator.add]
     
-def is_chatservice(service):
-    return service["name"] == "gen-ai-qwen3-ultra"
 
 class Queries(BaseModel):
     queries: List[str]
     
 class ewriter():
     def __init__(self):
+        # Load CF environment
+        env = AppEnv()
+        # configure model
         httpx_client = httpx.Client(http2=True, verify=False, timeout=10.0)
-
-        vcapservices = os.getenv('VCAP_SERVICES')
-        services = json.loads(vcapservices)
-
-
-
-        chat_services = filter(is_chatservice, services["genai"])
-        chat_credentials = list(chat_services)[0]["credentials"]
-
-        self.model = ChatOpenAI(temperature=0.9, model=chat_credentials["model_name"], base_url=chat_credentials["api_base"],    api_key=chat_credentials["api_key"], http_client=httpx_client)
+        # Get bound service "gen-ai-qwen3-ultra"
+        chat_service = env.get_service(name="gen-ai-qwen3-ultra")
+        chat_credentials = chat_service.credentials
+        
+        # Initialize LLM with credentials from cfenv
+        self.model = ChatOpenAI(
+            temperature=0.9,
+            model=chat_credentials["model_name"],
+            base_url=chat_credentials["api_base"],
+            api_key=chat_credentials["api_key"],
+            http_client=httpx_client
+        )
 
         self.PLAN_PROMPT = ("You are an expert writer tasked with writing a high level outline of a short 3 paragraph essay. "
                             "Write such an outline for the user provided topic. Give the three main headers of an outline of "
@@ -73,7 +77,7 @@ class ewriter():
                                          "be used when making any requested revisions (as outlined below). "
                                          "Generate a list of search queries that will gather any relevant information. "
                                          "Only generate 2 queries max.")
-        os.environ['TAVILY_API_KEY']="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"
+        os.environ['TAVILY_API_KEY']="your_tavily_key"
         self.tavily = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
         builder = StateGraph(AgentState)
         builder.add_node("planner", self.plan_node)
