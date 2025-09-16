@@ -1,5 +1,5 @@
-# Jupyter Notebook Samples with Tanzu Platform for Cloud Foundry
-This repository provides JupyterLab notebooks built with Python, leveraging LangChain and LangGraph. They demonstrate patterns for connecting to a variety of services—such as large language models, data services, and vector databases deployed on to Tanzu Platform for Cloud Foundry while incorporating service discovery and credential management.
+# Jupyter Notebook Samples with Tanzu Platform
+This repository provides JupyterLab notebooks built with Python, leveraging LangChain and LangGraph. They demonstrate patterns for connecting to a variety of services—such as large language models, data services, and vector databases deployed on to Tanzu Platform, formerly know as Tanzu Application Services (TAS) or Pivotal Cloud Foundry (PCF), while incorporating service discovery and credential management.
 
 ## Why JupyterLab on Tanzu Platform?
 
@@ -13,7 +13,7 @@ When JupyterLab is bound to multiple services, you get:
 - Data Services connectivity with advanced caching and Retrieval Augmented Generation (RAG) with Tanzu GemFire or Tanzu Valkey, event streaming with Tanzu RabbitMQ, or simplied RAG usecases for data exploration and feature engineering
 - Pre-approved LLM access for natural language processing and generation experiments
 - Vector database capabilities (GemFire, Valkey, Postgres, or MySQL) for embedding storage and similarity search
-- Automatic service discovery and credential management through Tanzu Platform for Cloud Foundry
+- Automatic service discovery and credential management through Tanzu Platform
 - Built-in observability for tracking resource usage and model performance
 
 
