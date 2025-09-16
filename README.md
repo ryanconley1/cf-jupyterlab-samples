@@ -10,9 +10,9 @@ This repository provides JupyterLab notebooks built with Python, leveraging Lang
 - Platform Teams maintain governance and cost control across all usage
 ### Integrated Workflow Benefits
 When JupyterLab is bound to multiple services, you get:
-- Data Services connectivity (like Postgres, Valkey, Gemfire, RabbitMQ) for data exploration and feature engineering
+- Data Services connectivity with advanced caching and Retrieval Augmented Generation (RAG) with Tanzu GemFire or Tanzu Valkey, event streaming with Tanzu RabbitMQ, or simplied RAG usecases for data exploration and feature engineering
 - Pre-approved LLM access for natural language processing and generation experiments
-- Vector database capabilities (Postgres or Gemfire) for embedding storage and similarity search
+- Vector database capabilities (GemFire, Valkey, Postgres, or MySQL) for embedding storage and similarity search
 - Automatic service discovery and credential management through Tanzu Platform for Cloud Foundry
 - Built-in observability for tracking resource usage and model performance
 
